@@ -70,6 +70,25 @@ class ShazamFingerprintEngine:
         2.RobinHoodHashTable to fetch (song_id, t_db)
         3.Counter Offset Histogram to find the tallest time-offset spike
         """
+        start_time_total = time.time()
+
+        # RMS Energy Silence
+        if len(raw_snippet) > 0:
+            rms_energy = np.sqrt(np.mean(raw_snippet**2))
+            # If the audio is practically silent (rms below 0.01), reject immediately
+            if rms_energy < 0.01:
+                return {
+                    "matched": False,
+                    "song_id": None,
+                    "song_title": "No Audio Detected / Too Quiet",
+                    "confidence_hits": 0,
+                    "timestamp_seconds": 0.0,
+                    "total_sample_hashes": 0,
+                    "noise_hashes_filtered": 0,
+                    "match_time_ms": round((time.time() - start_time_total) * 1000, 2),
+                    "top_histogram_spikes": []
+                }
+        
         start_time=time.perf_counter()
         _, sample_hashes=self._run_pipeline_from_array(raw_snippet, sample_rate)
 
@@ -142,30 +161,3 @@ class ShazamFingerprintEngine:
             self.robin_hood_index=data["robin_hood_index"]
             self.song_catalog=data["song_catalog"]
         print(f"Loaded {len(self.song_catalog)} songs ({self.robin_hood_index.size} unique hashes) from '{filepath}'.")
-
-
-# --- CLI VERIFICATION TEST (Run `python engine.py`) ---
-if __name__ == "__main__":
-    np.random.seed(42)
-    engine=ShazamFingerprintEngine()
-    fs=44100
-    duration=30  # 30-second test tracks
-
-    print("--- Indexing 5 Synthetic Tracks ---")
-    tracks={}
-    for s_id in range(1, 6):
-        t=np.linspace(0, duration, fs * duration, endpoint=False)
-        wave=np.zeros_like(t)
-        for sec in range(duration):
-            fa, fb=np.random.randint(300, 2000), np.random.randint(2000, 4500)
-            idx=slice(sec * fs, (sec + 1) * fs)
-            wave[idx]=np.sin(2 * np.pi * fa * t[idx]) + 0.8 * np.sin(2 * np.pi * fb * t[idx])
-        tracks[s_id]=wave
-        engine.index_song_array(s_id, f"Song_0{s_id}.wav", wave, fs)
-
-    print("\n--- Testing 4-Second Noisy Snippet from Song_04 at 17.5s ---")
-    start_idx, end_idx=int(17.5 * fs), int(21.5 * fs)
-    noisy_clip=tracks[4][start_idx:end_idx] + np.random.normal(0, 0.8, size=(end_idx - start_idx))
-
-    result=engine.recognize_snippet(noisy_clip, fs)
-    print("Match Result:", result)
